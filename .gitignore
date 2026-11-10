@@ -1,0 +1,14 @@
+# Ambientes virtuais
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+
+# Arquivos temporários do Office e SO
+~$*.xlsx
+Thumbs.db
+.DS_Store
+
+# Variáveis de ambiente e credenciais
+.env
