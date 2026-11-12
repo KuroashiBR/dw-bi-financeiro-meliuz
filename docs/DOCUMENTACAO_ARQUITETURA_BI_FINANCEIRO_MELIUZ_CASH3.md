@@ -75,11 +75,11 @@ dw-bi-financeiro-meliuz/
 
    * As aquisições de Bitcoin para reserva de valor são classificadas contabilmente como **Ativo Intangível (CPC 04 / IAS 38)** pelo critério de custo deduzido de perdas por redução ao valor recuperável (*impairment*).
 
-   * Na DFC, as compras de Bitcoin entram na linha de **"Adições ao intangível"** das Atividades de Investimento ($-\text{R\$} 360.136$ mil em 2025, dos quais $\text{R\$} 350.169$ mil referem-se a aquisições de Bitcoin, conforme discriminado na Nota Explicativa nº 9 do ITR). As alienações parciais entram em **"Recebimento pela venda de Bitcoin"** ($\text{R\$} 29.350$ mil no $3\text{T}26$).
+   * Na DFC, as compras de Bitcoin entram na linha de **"Adições ao intangível"** das Atividades de Investimento (-R$ 360.136 mil em 2025, dos quais R$ 350.169 mil referem-se a aquisições de Bitcoin, conforme discriminado na Nota Explicativa nº 9 do ITR). As alienações parciais entram em **"Recebimento pela venda de Bitcoin"** (R$ 29.350 mil no $3\text{T}26$).
 
 4. **Segregação do Impairment Histórico e Impacto Setorial:**
 
-   * O impairment de $-\text{R\$} 82.995$ mil registrado no $2\text{T}24$ decorreu do teste de recuperabilidade realizado em 30/06/2024 sobre a controlada **Picodi** (abrangendo ágio/*goodwill* de $\text{R\$} 78.797$ mil e marca de $\text{R\$} 955$ mil, totalizando $\text{R\$} 79.752$ mil), somado à baixa contábil de $\text{R\$} 3.243$ mil de ativos intangíveis da plataforma de desenvolvimento interno.
+   * O impairment de -R$ 82.995 mil registrado no $2\text{T}24$ decorreu do teste de recuperabilidade realizado em 30/06/2024 sobre a controlada **Picodi** (abrangendo ágio/*goodwill* de R$ 78.797 mil e marca de R$ 955 mil, totalizando R$ 79.752 mil), somado à baixa contábil de R$ 3.243 mil de ativos intangíveis da plataforma de desenvolvimento interno.
 
    * **Impacto na Análise por Segmentos:** Na análise setorial e nas conciliações de EBITDA Ajustado, essa perda deve ser atribuída exclusivamente ao segmento **B2C Internacional (Picodi)**, evitando distorções na rentabilidade operacional apurada pelo B2C Nacional.
 
