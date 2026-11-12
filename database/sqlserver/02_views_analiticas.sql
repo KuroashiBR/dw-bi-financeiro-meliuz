@@ -60,10 +60,10 @@ INNER JOIN dim_plano_contas d
 WHERE f.periodo_codigo = '3T26'
   AND (
       (d.demonstrativo = 'DRE' AND d.descricao_conta IN ('Receita operacional líquida', 'Lucro líquido (prejuízo) do exercício'))
-      OR (d.demonstrativo = 'DFC' AND d.descricao_conta IN (
-          'Caixa líquido gerado nas atividades operacionais',
-          'Caixa líquido usado nas atividades de financiamento',
-          'Recebimento pela venda de Bitcoin'
+      OR (d.demonstrativo = 'DFC' AND (
+          d.descricao_conta LIKE 'Caixa líquido%atividades operacionais%'
+          OR d.descricao_conta LIKE 'Caixa líquido%atividades de financiamento%'
+          OR d.descricao_conta = 'Recebimento pela venda de Bitcoin'
       ))
   )
 UNION ALL
