@@ -866,6 +866,33 @@ CALCULATE(
 
 ```
 
+### 6.3 Desambiguação de Contas Homônimas e Ordenação Contábil (`conta_exibicao`)
+
+Como o plano de contas consolidado apresenta descrições idênticas em grupos distintos (por exemplo, `"Outros"` no Ativo Circulante e Passivo Circulante; `"Depreciação e amortização"` na DRE e DFC; `"Caixa e equivalentes de caixa"` no BP e na DFC), a ordenação direta da coluna `descricao_conta` por `ordem_exibicao` viola a restrição de cardinalidade `1:1` exigida pelo motor tabular do Power BI.
+
+Para preservar a hierarquia contábil oficial nas matrizes sem exibir códigos técnicos artificiais nos rótulos, implementou-se a coluna calculada `conta_exibicao` na dimensão `dim_plano_contas`, concatenando caracteres invisíveis de largura zero (`UNICHAR(8203)`) de acordo com a ordem de ocorrência de cada descrição:
+
+```dax
+conta_exibicao = 
+VAR Ocorrencia = 
+    RANKX(
+        FILTER(
+            dim_plano_contas,
+            dim_plano_contas[descricao_conta] = EARLIER(dim_plano_contas[descricao_conta])
+        ),
+        dim_plano_contas[ordem_exibicao],
+        ,
+        ASC,
+        DENSE
+    )
+RETURN
+dim_plano_contas[descricao_conta] & REPT(UNICHAR(8203), Ocorrencia - 1)
+```
+
+Com essa abordagem, cada linha assume uma assinatura única (permitindo classificar `conta_exibicao` por `ordem_exibicao` e impedindo a agregação indevida de contas homônimas de grupos distintos), mantendo a renderização visual limpa nos relatórios.
+
+---
+
 ## 7. Rastreabilidade e Auditoria Contábil
 
 * **Natureza da Opinião:** Os demonstrativos trimestrais (ITRs) possuem **relatório de revisão especial/limitada** emitido pela PwC nos termos da NBC TR 2410 / ISRE 2410. A auditoria completa com opinião formal aplica-se exclusivamente às demonstrações financeiras anuais (DFPs).
