@@ -18,8 +18,8 @@ CREATE TABLE fato_movimento_contabil (
     id_conta VARCHAR(64) NOT NULL FOREIGN KEY REFERENCES dim_plano_contas(id_conta),
     data_fechamento DATE NOT NULL,
     periodo_codigo VARCHAR(10) NOT NULL,
-    valor_discreto DECIMAL(18, 2),
-    valor_ytd DECIMAL(18, 2),
+    valor_discreto DECIMAL(18, 5),
+    valor_ytd DECIMAL(18, 5),
     data_carga DATETIME DEFAULT GETDATE(),
     CONSTRAINT pk_fato_movimento PRIMARY KEY CLUSTERED (id_conta, data_fechamento)
 );
@@ -42,7 +42,7 @@ CREATE TABLE fato_indicadores_operacionais (
     id_metrica VARCHAR(64) NOT NULL FOREIGN KEY REFERENCES dim_metrica_operacional(id_metrica),
     data_fechamento DATE NOT NULL,
     periodo_codigo VARCHAR(10) NOT NULL,
-    valor_metrica DECIMAL(18, 4) NOT NULL,
+    valor_metrica DECIMAL(18, 10) NOT NULL,
     data_carga DATETIME DEFAULT GETDATE(),
     CONSTRAINT pk_fato_indicadores PRIMARY KEY CLUSTERED (id_metrica, data_fechamento)
 );

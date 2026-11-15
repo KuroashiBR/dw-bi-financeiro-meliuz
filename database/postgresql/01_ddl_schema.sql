@@ -16,8 +16,8 @@ CREATE TABLE IF NOT EXISTS fato_movimento_contabil (
     id_conta VARCHAR(64) NOT NULL REFERENCES dim_plano_contas(id_conta),
     data_fechamento DATE NOT NULL,
     periodo_codigo VARCHAR(10) NOT NULL,
-    valor_discreto NUMERIC(18, 2),
-    valor_ytd NUMERIC(18, 2),
+    valor_discreto NUMERIC(18, 5),
+    valor_ytd NUMERIC(18, 5),
     data_carga TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT pk_fato_movimento PRIMARY KEY (id_conta, data_fechamento)
 );
@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS fato_indicadores_operacionais (
     id_metrica VARCHAR(64) NOT NULL REFERENCES dim_metrica_operacional(id_metrica),
     data_fechamento DATE NOT NULL,
     periodo_codigo VARCHAR(10) NOT NULL,
-    valor_metrica NUMERIC(18, 4) NOT NULL,
+    valor_metrica NUMERIC(18, 10) NOT NULL,
     data_carga TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT pk_fato_indicadores PRIMARY KEY (id_metrica, data_fechamento)
 );

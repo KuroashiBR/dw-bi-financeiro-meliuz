@@ -12,3 +12,6 @@ Thumbs.db
 
 # Variáveis de ambiente e credenciais
 .env
+
+# Pytest
+.pytest_cache/

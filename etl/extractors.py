@@ -16,6 +16,15 @@ def get_latest_file(data_folder: str = "./data") -> str:
     return max(files, key=os.path.getmtime)
 
 
+CASAS_VALOR_CONTABIL = 5   # NUMERIC(18,5) nos DDLs (a fonte traz até 5 casas em R$ mil)
+CASAS_VALOR_METRICA = 10   # NUMERIC(18,10) nos DDLs (take rate é fração com até 10 casas)
+
+
+def _arredonda(valor, casas: int):
+    """Arredonda preservando None; elimina ruído de ponto flutuante (ex.: 16959.278090000007)."""
+    return None if valor is None else round(valor, casas)
+
+
 def generate_hash_id(parts: list) -> str:
     """Gera hash determinístico MD5 baseado nas partes constitutivas da chave natural."""
     clean_parts = [re.sub(r'[^a-zA-Z0-9_]', '', str(p).upper().replace(' ', '_')) for p in parts]
@@ -104,6 +113,7 @@ def extract_financial_statements(file_path: str) -> tuple[pd.DataFrame, pd.DataF
         indent = len(pt_str) - len(pt_str.lstrip(' '))
         clean_pt = re.sub(r'[¹²³⁴⁵⁶⁷⁸⁹⁰]', '', pt_str).strip()
         clean_pt = re.sub(r'\s+', ' ', clean_pt)
+        clean_pt = re.sub(r'(?<=[A-Za-zÀ-ÿ\)])\d+$', '', clean_pt)  # nota de rodapé em dígito ASCII colada ao rótulo
         clean_lower = clean_pt.lower()
 
         if r < bounds['ebitda_start']:
@@ -230,8 +240,12 @@ def extract_financial_statements(file_path: str) -> tuple[pd.DataFrame, pd.DataF
 
             elif current_sec == "DFC":
                 if current_sub == "SALDOS_CAIXA":
-                    v_discreto = cur_val
-                    v_ytd = cur_val
+                    if q["ano"] < 2020 or (q["ano"] == 2020 and q["trimestre"] in [1, 2]):
+                        v_discreto = None  # sem DFC na fonte: o 0 da planilha é ausência de dado
+                        v_ytd = None
+                    else:
+                        v_discreto = cur_val
+                        v_ytd = cur_val
                 else:
                     if q["ano"] < 2020 or (q["ano"] == 2020 and q["trimestre"] in [1, 2]):
                         v_discreto = None
@@ -256,8 +270,8 @@ def extract_financial_statements(file_path: str) -> tuple[pd.DataFrame, pd.DataF
                 "id_conta": id_conta,
                 "data_fechamento": q["data_fechamento"],
                 "periodo_codigo": p_code,
-                "valor_discreto": v_discreto,
-                "valor_ytd": v_ytd
+                "valor_discreto": _arredonda(v_discreto, CASAS_VALOR_CONTABIL),
+                "valor_ytd": _arredonda(v_ytd, CASAS_VALOR_CONTABIL)
             })
 
     return pd.DataFrame(list(dim_contas.values())), pd.DataFrame(fato_contabil)
@@ -285,6 +299,9 @@ def extract_operational_indicators(file_path: str) -> tuple[pd.DataFrame, pd.Dat
         {"id_metrica": "BTC_GAIN_BRL_MI", "categoria": "BITCOIN", "subgrupo": "TESOURARIA", "nome_metrica": "Bitcoin Gain", "unidade_medida": "R$ MILHOES", "row": 16, "source": "BTC"}
     ]
 
+    TAKE_RATES = ("TAKE_RATE_BRUTO", "TAKE_RATE_LIQUIDO")
+    take_rate_iniciou = {m: False for m in TAKE_RATES}
+
     fato_metricas = []
     for m in dim_metricas:
         target_df = df_op if m["source"] == "OP" else df_btc
@@ -302,15 +319,18 @@ def extract_operational_indicators(file_path: str) -> tuple[pd.DataFrame, pd.Dat
                 except (ValueError, TypeError):
                     num_val = None
 
-                if m["id_metrica"] in ["TAKE_RATE_BRUTO", "TAKE_RATE_LIQUIDO"] and q["ano"] == 2019 and num_val == 0.0:
-                    num_val = None
+                if m["id_metrica"] in TAKE_RATES:
+                    if num_val == 0.0 and not take_rate_iniciou[m["id_metrica"]]:
+                        num_val = None  # zero anterior à primeira medição real = sem dado
+                    elif num_val:
+                        take_rate_iniciou[m["id_metrica"]] = True
 
                 if num_val is not None:
                     fato_metricas.append({
                         "id_metrica": m["id_metrica"],
                         "data_fechamento": q["data_fechamento"],
                         "periodo_codigo": q["periodo_codigo"],
-                        "valor_metrica": num_val
+                        "valor_metrica": _arredonda(num_val, CASAS_VALOR_METRICA)
                     })
 
     df_dim_m = pd.DataFrame(dim_metricas).drop(columns=["row", "source"])
