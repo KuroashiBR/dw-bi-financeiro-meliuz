@@ -24,7 +24,8 @@ CREATE TABLE fato_movimento_contabil (
     CONSTRAINT pk_fato_movimento PRIMARY KEY CLUSTERED (id_conta, data_fechamento)
 );
 
-CREATE NONCLUSTERED INDEX idx_fato_mov_data ON fato_movimento_contabil(data_fechamento);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_fato_mov_data' AND object_id = OBJECT_ID('fato_movimento_contabil'))
+    CREATE NONCLUSTERED INDEX idx_fato_mov_data ON fato_movimento_contabil(data_fechamento);
 
 -- 3. Dimensão Métrica Operacional
 IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='dim_metrica_operacional' AND xtype='U')
@@ -47,4 +48,5 @@ CREATE TABLE fato_indicadores_operacionais (
     CONSTRAINT pk_fato_indicadores PRIMARY KEY CLUSTERED (id_metrica, data_fechamento)
 );
 
-CREATE NONCLUSTERED INDEX idx_fato_ind_data ON fato_indicadores_operacionais(data_fechamento);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_fato_ind_data' AND object_id = OBJECT_ID('fato_indicadores_operacionais'))
+    CREATE NONCLUSTERED INDEX idx_fato_ind_data ON fato_indicadores_operacionais(data_fechamento);

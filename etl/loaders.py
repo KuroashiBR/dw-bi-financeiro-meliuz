@@ -3,15 +3,23 @@
 import logging
 import pandas as pd
 from sqlalchemy import text
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Connection, Engine
+
+
+def _carrega_staging(conn: Connection, nome: str, df: pd.DataFrame) -> None:
+    """Grava a staging na MESMA transação do MERGE/UPSERT.
+
+    Se a carga falhar, o rollback desfaz também a criação da staging (DDL transacional no SQL Server
+    e no PostgreSQL), sem deixar tabela `stg_*` órfã.
+    """
+    df.to_sql(nome, conn, if_exists="replace", index=False)
 
 
 def load_dim_plano_contas(engine: Engine, db_type: str, df: pd.DataFrame) -> None:
     """Executa MERGE/UPSERT da dimensão dim_plano_contas e limpa staging."""
     stg_table = "stg_dim_plano_contas"
-    df.to_sql(stg_table, engine, if_exists="replace", index=False)
-
     with engine.begin() as conn:
+        _carrega_staging(conn, stg_table, df)
         if db_type == "sqlserver":
             conn.execute(text("""
                 MERGE INTO dim_plano_contas AS t
@@ -22,9 +30,12 @@ def load_dim_plano_contas(engine: Engine, db_type: str, df: pd.DataFrame) -> Non
                 ) AS s ON t.id_conta = s.id_conta
                 WHEN MATCHED THEN
                     UPDATE SET
+                        t.demonstrativo = s.demonstrativo,
+                        t.secao_contabil = s.secao_contabil,
+                        t.subgrupo = s.subgrupo,
                         t.descricao_conta = s.descricao_conta,
                         t.tipo_conta = s.tipo_conta,
-                        t.subgrupo = s.subgrupo,
+                        t.nivel_hierarquia = s.nivel_hierarquia,
                         t.ordem_exibicao = s.ordem_exibicao,
                         t.natureza_sinal = s.natureza_sinal
                 WHEN NOT MATCHED THEN
@@ -44,9 +55,12 @@ def load_dim_plano_contas(engine: Engine, db_type: str, df: pd.DataFrame) -> Non
                     tipo_conta, nivel_hierarquia, ordem_exibicao, natureza_sinal
                 FROM stg_dim_plano_contas
                 ON CONFLICT (id_conta) DO UPDATE SET
+                    demonstrativo = EXCLUDED.demonstrativo,
+                    secao_contabil = EXCLUDED.secao_contabil,
+                    subgrupo = EXCLUDED.subgrupo,
                     descricao_conta = EXCLUDED.descricao_conta,
                     tipo_conta = EXCLUDED.tipo_conta,
-                    subgrupo = EXCLUDED.subgrupo,
+                    nivel_hierarquia = EXCLUDED.nivel_hierarquia,
                     ordem_exibicao = EXCLUDED.ordem_exibicao,
                     natureza_sinal = EXCLUDED.natureza_sinal;
 
@@ -58,9 +72,8 @@ def load_dim_plano_contas(engine: Engine, db_type: str, df: pd.DataFrame) -> Non
 def load_fato_movimento_contabil(engine: Engine, db_type: str, df: pd.DataFrame) -> None:
     """Executa MERGE/UPSERT da fato fato_movimento_contabil e limpa staging."""
     stg_table = "stg_fato_movimento_contabil"
-    df.to_sql(stg_table, engine, if_exists="replace", index=False)
-
     with engine.begin() as conn:
+        _carrega_staging(conn, stg_table, df)
         if db_type == "sqlserver":
             conn.execute(text("""
                 MERGE INTO fato_movimento_contabil AS t
@@ -100,9 +113,8 @@ def load_fato_movimento_contabil(engine: Engine, db_type: str, df: pd.DataFrame)
 def load_dim_metrica_operacional(engine: Engine, db_type: str, df: pd.DataFrame) -> None:
     """Executa MERGE/UPSERT da dimensão dim_metrica_operacional e limpa staging."""
     stg_table = "stg_dim_metrica_operacional"
-    df.to_sql(stg_table, engine, if_exists="replace", index=False)
-
     with engine.begin() as conn:
+        _carrega_staging(conn, stg_table, df)
         if db_type == "sqlserver":
             conn.execute(text("""
                 MERGE INTO dim_metrica_operacional AS t
@@ -143,9 +155,8 @@ def load_dim_metrica_operacional(engine: Engine, db_type: str, df: pd.DataFrame)
 def load_fato_indicadores_operacionais(engine: Engine, db_type: str, df: pd.DataFrame) -> None:
     """Executa MERGE/UPSERT da fato fato_indicadores_operacionais sem SELECT * e limpa staging."""
     stg_table = "stg_fato_indicadores_operacionais"
-    df.to_sql(stg_table, engine, if_exists="replace", index=False)
-
     with engine.begin() as conn:
+        _carrega_staging(conn, stg_table, df)
         if db_type == "sqlserver":
             conn.execute(text("""
                 MERGE INTO fato_indicadores_operacionais AS t

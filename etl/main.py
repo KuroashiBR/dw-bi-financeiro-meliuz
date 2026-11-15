@@ -1,6 +1,14 @@
-"""Orquestrador principal do pipeline ETL - Méliuz (CASH3)."""
+"""Orquestrador principal do pipeline ETL - Méliuz (CASH3).
 
+Uso (a partir de qualquer diretório):
+    python etl/main.py                                  # padrões vindos de config/.env
+    python etl/main.py --db postgresql --server localhost --database dwmeliuz
+    python etl/main.py --file "data/Dados historicos Meliuz_3T26.xlsx"
+"""
+
+import argparse
 import logging
+
 from config import DATA_FOLDER, DEFAULT_DB_TYPE, DEFAULT_DB_NAME, DEFAULT_SERVER, get_db_engine
 from extractors import get_latest_file, extract_financial_statements, extract_operational_indicators
 from loaders import (
@@ -13,8 +21,13 @@ from loaders import (
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
 
-def run_pipeline(db_type: str = DEFAULT_DB_TYPE, db_name: str = DEFAULT_DB_NAME, server: str = DEFAULT_SERVER) -> None:
-    arquivo = get_latest_file(DATA_FOLDER)
+def run_pipeline(
+    db_type: str = DEFAULT_DB_TYPE,
+    db_name: str = DEFAULT_DB_NAME,
+    server: str = DEFAULT_SERVER,
+    arquivo: str | None = None,
+) -> None:
+    arquivo = arquivo or get_latest_file(DATA_FOLDER)
     logging.info(f"Iniciando ingestão do arquivo: {arquivo}")
 
     engine = get_db_engine(db_type=db_type, db_name=db_name, server=server)
@@ -32,5 +45,15 @@ def run_pipeline(db_type: str = DEFAULT_DB_TYPE, db_name: str = DEFAULT_DB_NAME,
     logging.info("Pipeline ETL finalizado com sucesso.")
 
 
+def parse_args(argv=None) -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="Carrega a planilha de RI da Méliuz no Data Warehouse.")
+    p.add_argument("--db", choices=["sqlserver", "postgresql"], default=DEFAULT_DB_TYPE, help="SGBD de destino")
+    p.add_argument("--server", default=DEFAULT_SERVER, help="host do servidor")
+    p.add_argument("--database", default=DEFAULT_DB_NAME, help="nome do banco")
+    p.add_argument("--file", default=None, help="planilha .xlsx (padrão: a mais recente em data/)")
+    return p.parse_args(argv)
+
+
 if __name__ == "__main__":
-    run_pipeline()
+    args = parse_args()
+    run_pipeline(db_type=args.db, db_name=args.database, server=args.server, arquivo=args.file)

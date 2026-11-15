@@ -7,12 +7,26 @@ import hashlib
 import pandas as pd
 
 
+def _chave_trimestre(caminho: str):
+    """(ano, trimestre) lido do nome do arquivo (ex.: '..._3T26.xlsx' -> (2026, 3)); None se ausente."""
+    m = re.search(r'(?<!\d)([1-4])T(\d{2})(?!\d)', os.path.basename(caminho), re.IGNORECASE)
+    return (2000 + int(m.group(2)), int(m.group(1))) if m else None
+
+
 def get_latest_file(data_folder: str = "./data") -> str:
-    """Identifica a planilha mais recente, ignorando arquivos temporários (~$)."""
+    """Identifica a planilha mais recente, ignorando arquivos temporários (~$).
+
+    O critério é o trimestre no nome do arquivo (robusto a `git clone`, que zera as diferenças de
+    data de modificação). Arquivos sem trimestre no nome só são usados se nenhum tiver; nesse caso
+    vale a data de modificação.
+    """
     pattern = os.path.join(data_folder, "*Meliuz*.xlsx")
     files = [f for f in glob.glob(pattern) if not os.path.basename(f).startswith("~$")]
     if not files:
         raise FileNotFoundError(f"Nenhum arquivo válido encontrado em {data_folder}")
+    com_trimestre = [f for f in files if _chave_trimestre(f)]
+    if com_trimestre:
+        return max(com_trimestre, key=lambda f: (_chave_trimestre(f), os.path.getmtime(f)))
     return max(files, key=os.path.getmtime)
 
 
