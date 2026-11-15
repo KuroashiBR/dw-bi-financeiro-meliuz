@@ -40,9 +40,57 @@ Para uma visão aprofundada da modelagem dimensional (*Star Schema*), fundamento
 
 ```text
 dw-bi-financeiro-meliuz/
-├── data/          # Historical IR spreadsheets (1Q19 - 3Q26)
-├── database/      # Star Schema DDLs (SQL Server & PostgreSQL)
-├── docs/          # Full technical and accounting specification
-├── etl/           # Python ingestion, temporal disaggregation & upsert pipeline
-├── powerbi/       # Power Query (M) calendar & Power BI semantic model
-└── README.md      # Project overview
+├── data/             # Historical IR spreadsheets (1Q19 - 3Q26)
+├── database/         # Star Schema DDLs and analytical views (SQL Server & PostgreSQL)
+├── docs/             # Full technical and accounting specification
+├── etl/              # Python extraction, temporal disaggregation & upsert pipeline (config, extractors, loaders, main)
+├── powerbi/          # Power Query (M) calendar (the .pbix report is not versioned here)
+├── tests/            # pytest suite: accounting reconciliations, integrity, config/CLI
+├── .github/workflows # CI: runs pytest on push and pull requests
+├── .env.example      # Environment variables template (copy to .env)
+├── pytest.ini
+├── requirements-dev.txt
+└── README.md         # Project overview
+```
+
+---
+
+## 🚀 How to Run / Como Rodar
+
+**Requirements / Requisitos:** Python 3.10+ and a SQL Server or PostgreSQL database. SQL Server also needs the *ODBC Driver 17 for SQL Server*.
+
+**1. Install / Instalar**
+```bash
+pip install -r etl/requirements.txt
+```
+
+**2. Create the schema / Criar o esquema** — run, in this order, the scripts of your database (`database/sqlserver/` or `database/postgresql/`): `01_ddl_schema.sql`, then `02_views_analiticas.sql`.
+
+> ⚠️ `CREATE TABLE IF NOT EXISTS` does not alter existing tables. If you loaded data with an older version of the DDL, recreate the tables (or `ALTER COLUMN`) to get the current numeric precision (`valor_discreto`/`valor_ytd` as 5 decimals, `valor_metrica` as 10).
+> ⚠️ `CREATE TABLE IF NOT EXISTS` não altera tabelas existentes. Se você já carregou dados com uma versão antiga do DDL, recrie as tabelas (ou use `ALTER COLUMN`) para obter a precisão numérica atual.
+
+**3. Configure the connection / Configurar a conexão** — copy `.env.example` to `.env` (ignored by git) and edit it, or set the same variables in your shell:
+
+| Variable | Meaning |
+|---|---|
+| `DW_DB_TYPE` | `sqlserver` (default) or `postgresql` |
+| `DW_DB_SERVER`, `DW_DB_NAME`, `DW_DB_PORT` | Host, database and (optional) port |
+| `DW_DB_USER`, `DW_DB_PASSWORD` | SQL Server: leave `DW_DB_USER` empty to use Windows integrated authentication. PostgreSQL: `DW_DB_PASSWORD` is required |
+| `DW_ODBC_DRIVER` | Defaults to `ODBC Driver 17 for SQL Server` |
+
+**4. Load / Carregar**
+```bash
+python etl/main.py                                   # uses .env / defaults and the latest spreadsheet in data/
+python etl/main.py --db postgresql --server localhost --database dwmeliuz
+python etl/main.py --file "data/Dados historicos Meliuz_3T26.xlsx"
+```
+The latest spreadsheet is chosen by the quarter in the file name (e.g. `_3T26`). / A planilha mais recente é escolhida pelo trimestre no nome do arquivo.
+
+**5. Test / Testar**
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+The suite runs the extractor against the spreadsheet in `data/` (no database required) and checks accounting identities (assets = liabilities + equity, income statement chain, cash flow sums, DFC vs. balance sheet cash) and structural integrity. To test a new spreadsheet before copying it to `data/`: `DW_XLSX=<path> pytest`. / A suíte roda o extrator sobre a planilha em `data/` (sem banco) e confere identidades contábeis e a integridade estrutural.
+
+> The SQL (`MERGE` / `UPSERT`, views, DDL) is not covered by automated tests: validate it against your database after the first load. / O SQL (`MERGE`/`UPSERT`, views, DDL) não é coberto por testes automatizados: valide no seu banco após a primeira carga.

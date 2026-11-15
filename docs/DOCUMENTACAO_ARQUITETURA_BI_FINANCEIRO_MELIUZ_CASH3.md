@@ -45,17 +45,26 @@ dw-bi-financeiro-meliuz/
 │       └── 02_views_analiticas.sql
 │
 ├── etl/
-│   ├── etl_meliuz_dw.py
+│   ├── config.py            # conexão (variáveis de ambiente / .env) e caminho dos dados
+│   ├── extractors.py        # leitura da planilha, regras contábeis e desagregação temporal
+│   ├── loaders.py           # carga idempotente (MERGE / UPSERT) por tabela
+│   ├── main.py              # orquestrador e linha de comando
 │   └── requirements.txt
 │
+├── tests/                   # suíte pytest (reconciliações contábeis, integridade, config/CLI)
+├── .github/workflows/       # CI: pytest em push e pull request
 ├── powerbi/
-│   ├── dCalendario.m
-│   └── relatorio_financeiro_meliuz.pbix
+│   └── dCalendario.m
 │
-└── docs/
-    └── PROJETO_DW_BI_FINANCEIRO_MELIUZ.md
-
+├── docs/
+│   └── DOCUMENTACAO_ARQUITETURA_BI_FINANCEIRO_MELIUZ_CASH3.md
+│
+├── .env.example             # modelo das variáveis de ambiente (copiar para .env)
+├── pytest.ini
+└── requirements-dev.txt
 ```
+
+> O relatório do Power BI (`.pbix`) **não é versionado** neste repositório; apenas o script do calendário em Power Query (`dCalendario.m`) e as medidas DAX documentadas na seção 6.
 
 ## 3. Fundamentos de Negócio e Particularidades Contábeis
 
@@ -117,7 +126,13 @@ Na planilha gerencial da Méliuz, custos e despesas já são grafados como valor
   \text{Saldo}_{discreto} = \text{Saldo}_{ytd} = \text{Saldo em Caixa}
   $$
 
-* **Sanitização de Séries Incompletas:** Os dados da DFC em 2019 e no $1\text{T}20$/$2\text{T}20$ possuem zeros artificiais na planilha. O pipeline define esses períodos como `NULL`. No $3\text{T}20$, o valor reportado reflete o acumulado de 9 meses sem base de comparação anterior; logo, o pipeline armazena o valor em `valor_ytd` e define `valor_discreto = NULL`.
+* **Sanitização de Séries Incompletas:** Os dados da DFC em 2019 e no $1\text{T}20$/$2\text{T}20$ possuem zeros artificiais na planilha. O pipeline define esses períodos como `NULL`, **inclusive os saldos de caixa** (linhas "No início/No final do exercício"): como não há DFC nesses trimestres, o zero da fonte representa ausência de dado. No $3\text{T}20$, o valor reportado reflete o acumulado de 9 meses sem base de comparação anterior; logo, o pipeline armazena o valor em `valor_ytd` e define `valor_discreto = NULL`.
+
+* **Zeros anteriores à primeira medição (métricas operacionais):** o *take rate* bruto só é medido a partir do $3\text{T}20$ e o líquido a partir do $1\text{T}21$; os zeros que a planilha traz antes disso são tratados como `NULL`. Um zero **depois** da primeira medição real é preservado.
+
+* **Precisão numérica:** a planilha traz valores em R\$ mil com até 5 casas decimais (ex.: `-62500.91196`) e o *take rate* como fração com até 10 casas. O pipeline arredonda a 5 casas (valores contábeis) e a 10 (métricas), eliminando ruído de ponto flutuante, e os DDLs usam `NUMERIC(18,5)` / `DECIMAL(18,5)` e `NUMERIC(18,10)` / `DECIMAL(18,10)` para não perder precisão na carga.
+
+* **Notas de rodapé coladas ao rótulo:** alguns rótulos chegam da planilha com o dígito da nota de rodapé (ex.: `Outros5`, `Publicidade e propaganda4`). O pipeline remove esse dígito final antes de gerar o `id_conta`. Em consequência, `Outros` aparece duas vezes no mesmo subgrupo da DRE (o filho de *Cashback* e a linha operacional); o contador de ocorrência as distingue e a coluna `conta_exibicao` (seção 6.3) as separa nos relatórios.
 
 ## 4. Modelo de Dados Relacional (Star Schema)
 
@@ -174,13 +189,13 @@ CREATE TABLE IF NOT EXISTS fato_movimento_contabil (
     id_conta VARCHAR(64) NOT NULL REFERENCES dim_plano_contas(id_conta),
     data_fechamento DATE NOT NULL,
     periodo_codigo VARCHAR(10) NOT NULL,
-    valor_discreto NUMERIC(18, 2),
-    valor_ytd NUMERIC(18, 2),
+    valor_discreto NUMERIC(18, 5),
+    valor_ytd NUMERIC(18, 5),
     data_carga TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT pk_fato_movimento PRIMARY KEY (id_conta, data_fechamento)
 );
 
-CREATE INDEX idx_fato_mov_data ON fato_movimento_contabil(data_fechamento);
+CREATE INDEX IF NOT EXISTS idx_fato_mov_data ON fato_movimento_contabil(data_fechamento);
 
 -- 3. Dimensão Métrica Operacional
 CREATE TABLE IF NOT EXISTS dim_metrica_operacional (
@@ -196,12 +211,12 @@ CREATE TABLE IF NOT EXISTS fato_indicadores_operacionais (
     id_metrica VARCHAR(64) NOT NULL REFERENCES dim_metrica_operacional(id_metrica),
     data_fechamento DATE NOT NULL,
     periodo_codigo VARCHAR(10) NOT NULL,
-    valor_metrica NUMERIC(18, 4) NOT NULL,
+    valor_metrica NUMERIC(18, 10) NOT NULL,
     data_carga TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT pk_fato_indicadores PRIMARY KEY (id_metrica, data_fechamento)
 );
 
-CREATE INDEX idx_fato_ind_data ON fato_indicadores_operacionais(data_fechamento);
+CREATE INDEX IF NOT EXISTS idx_fato_ind_data ON fato_indicadores_operacionais(data_fechamento);
 
 ```
 
@@ -228,13 +243,14 @@ CREATE TABLE fato_movimento_contabil (
     id_conta VARCHAR(64) NOT NULL FOREIGN KEY REFERENCES dim_plano_contas(id_conta),
     data_fechamento DATE NOT NULL,
     periodo_codigo VARCHAR(10) NOT NULL,
-    valor_discreto DECIMAL(18, 2),
-    valor_ytd DECIMAL(18, 2),
+    valor_discreto DECIMAL(18, 5),
+    valor_ytd DECIMAL(18, 5),
     data_carga DATETIME DEFAULT GETDATE(),
     CONSTRAINT pk_fato_movimento PRIMARY KEY CLUSTERED (id_conta, data_fechamento)
 );
 
-CREATE NONCLUSTERED INDEX idx_fato_mov_data ON fato_movimento_contabil(data_fechamento);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_fato_mov_data' AND object_id = OBJECT_ID('fato_movimento_contabil'))
+    CREATE NONCLUSTERED INDEX idx_fato_mov_data ON fato_movimento_contabil(data_fechamento);
 
 -- 3. Dimensão Métrica Operacional
 IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='dim_metrica_operacional' AND xtype='U')
@@ -252,474 +268,80 @@ CREATE TABLE fato_indicadores_operacionais (
     id_metrica VARCHAR(64) NOT NULL FOREIGN KEY REFERENCES dim_metrica_operacional(id_metrica),
     data_fechamento DATE NOT NULL,
     periodo_codigo VARCHAR(10) NOT NULL,
-    valor_metrica DECIMAL(18, 4) NOT NULL,
+    valor_metrica DECIMAL(18, 10) NOT NULL,
     data_carga DATETIME DEFAULT GETDATE(),
     CONSTRAINT pk_fato_indicadores PRIMARY KEY CLUSTERED (id_metrica, data_fechamento)
 );
 
-CREATE NONCLUSTERED INDEX idx_fato_ind_data ON fato_indicadores_operacionais(data_fechamento);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_fato_ind_data' AND object_id = OBJECT_ID('fato_indicadores_operacionais'))
+    CREATE NONCLUSTERED INDEX idx_fato_ind_data ON fato_indicadores_operacionais(data_fechamento);
 
 ```
 
-## 5. Pipeline de Ingestão e Carga Automatizada (`etl_meliuz_dw.py`)
+## 5. Pipeline de Ingestão e Carga Automatizada (`etl/`)
 
+> **Nota de revisão.** Esta seção continha uma cópia integral de uma versão anterior do pipeline (um único arquivo, `etl_meliuz_dw.py`, com a classe `MeliuzETLPipeline`). Essa versão foi substituída pela implementação modular descrita abaixo; a cópia foi removida para que a documentação não diverja do código. O código vigente é o da pasta `etl/`; a versão antiga permanece no histórico do git.
+
+### 5.1 Módulos e fluxo
+
+| Módulo | Responsabilidade |
+|---|---|
+| `config.py` | Resolve o destino e as credenciais por variáveis de ambiente (ou `.env`) e monta a conexão SQLAlchemy. Define `DATA_FOLDER` como caminho absoluto, independente do diretório de execução |
+| `extractors.py` | Escolhe a planilha, localiza as seções, classifica as contas, desagrega no tempo e devolve DataFrames de dimensão e fato |
+| `loaders.py` | Carga idempotente por tabela: staging, `MERGE` (SQL Server) ou `INSERT ... ON CONFLICT` (PostgreSQL) |
+| `main.py` | Orquestra extração e carga dos dois domínios e expõe a linha de comando |
+
+Fluxo de `main.py`:
+
+1. Resolve a planilha: `--file` ou, por padrão, a mais recente em `data/`. O critério é o **trimestre no nome do arquivo** (ex.: `_3T26`); a data de modificação só vale se nenhum nome trouxer trimestre, e arquivos temporários do Office (`~$`) são ignorados.
+2. Cria a engine a partir de `config.py`.
+3. **Domínio 1 — Demonstrações financeiras:** `extract_financial_statements` → `load_dim_plano_contas` → `load_fato_movimento_contabil`.
+4. **Domínio 2 — Indicadores operacionais e Bitcoin:** `extract_operational_indicators` → `load_dim_metrica_operacional` → `load_fato_indicadores_operacionais`.
+
+### 5.2 Configuração e execução
+
+Variáveis de ambiente (modelo em `.env.example`):
+
+| Variável | Significado |
+|---|---|
+| `DW_DB_TYPE` | `sqlserver` (padrão) ou `postgresql` |
+| `DW_DB_SERVER`, `DW_DB_NAME`, `DW_DB_PORT` | Servidor, banco e porta (opcional) |
+| `DW_DB_USER`, `DW_DB_PASSWORD` | SQL Server: sem `DW_DB_USER`, usa autenticação integrada do Windows. PostgreSQL: `DW_DB_PASSWORD` é obrigatória |
+| `DW_ODBC_DRIVER` | Padrão `ODBC Driver 17 for SQL Server` |
+
+```bash
+python etl/main.py
+python etl/main.py --db postgresql --server localhost --database dwmeliuz
+python etl/main.py --file "data/Dados historicos Meliuz_3T26.xlsx"
 ```
-"""
-Pipeline de Ingestão e Modelagem Dimensional - Méliuz (CASH3)
-Executa extração, sanitização, desagregação temporal e upsert idempotente
-para PostgreSQL e SQL Server com subgrupos rigorosos e reconciliação da DFC.
-"""
 
-import os
-import re
-import glob
-import hashlib
-import logging
-import pandas as pd
-from sqlalchemy import create_engine, text
+Nenhuma credencial é versionada. O arquivo `.env` é ignorado pelo git.
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+### 5.3 Regras de extração (`extractors.py`)
 
-class MeliuzETLPipeline:
-    def __init__(self, data_folder="./", db_type="postgresql", conn_string=None):
-        self.data_folder = data_folder
-        self.db_type = db_type.lower()
-        self.conn_string = conn_string
-        self.engine = create_engine(conn_string) if conn_string else None
+* **Localização das seções (`find_section_bounds`):** por âncoras de texto na coluna de rótulos (DRE, EBITDA, Balanço, Fluxo de Caixa). Se uma âncora não é encontrada, o pipeline **falha com `AssertionError`** em vez de carregar dado incorreto.
+* **Trimestres (`detect_quarter_columns`):** lê o código `nTaa` do cabeçalho (`1T19 | 1Q19` → `1T19`), derivando a data de fechamento do último dia do trimestre e parando na coluna vazia que antecede os totais anuais. Os totais anuais da planilha não são carregados; a agregação anual é recalculada no banco e no Power BI.
+* **Rótulos:** remove sobrescritos (¹²³) e dígitos de nota de rodapé colados ao final do texto, normaliza espaços e usa o resultado como `descricao_conta`.
+* **`subgrupo`:** inferido pelos rótulos de cabeçalho de cada bloco (ex.: `ATIVO_CIRCULANTE`, `FLUXO_OPERACIONAL`, `SALDOS_CAIXA`, `VARIACAO_CAIXA_PERIODO`).
+* **`tipo_conta`:** `Gerencial` (conciliação do EBITDA), `Sintética` (subtotais e totais) ou `Analítica` (demais). No balanço, a soma das analíticas de cada grupo (ativo circulante, passivo circulante e passivo não circulante) reproduz o subtotal informado pela RI, o que é verificado nos testes; uma conta mal classificada faz a soma deixar de fechar.
+* **`id_conta`:** MD5 (16 primeiros caracteres hexadecimais) de `seção + subgrupo + rótulo`. Rótulos repetidos no mesmo subgrupo recebem um contador de ocorrência na ordem em que aparecem na planilha. **Consequência:** renomear um rótulo na fonte ou inserir uma linha repetida acima de outra altera ids; o pipeline não mantém tabela de equivalência.
+* **Valor discreto e YTD:** DRE (fluxo, valor nativo é o discreto, YTD é a soma acumulada intra-anual), DFC (valor nativo é o YTD, o discreto é o delta trimestral, conforme seção 3.3), BP e saldos de caixa (estoque: discreto = YTD). Regras de `NULL` para séries incompletas na seção 3.3.
+* **Precisão:** valores contábeis arredondados a 5 casas e métricas a 10, como descrito na seção 3.3.
+* **Métricas operacionais (`extract_operational_indicators`):** o mapeamento entre métrica e linha da planilha é **posicional** (índices de linha fixos no código, para a aba operacional e para a de Bitcoin). Se a RI inserir ou mover linhas, esse mapeamento precisa ser revisto.
 
-    def get_latest_file(self):
-        """Identifica a planilha mais recente, ignorando arquivos temporários (~$)."""
-        pattern = os.path.join(self.data_folder, "*Meliuz*.xlsx")
-        files = [f for f in glob.glob(pattern) if not os.path.basename(f).startswith("~$")]
-        if not files:
-            raise FileNotFoundError(f"Nenhum arquivo válido encontrado em {self.data_folder}")
-        return max(files, key=os.path.getmtime)
+### 5.4 Carga (`loaders.py`)
 
-    @staticmethod
-    def generate_hash_id(parts):
-        """Gera hash determinístico MD5 baseado nas partes constitutivas da chave natural."""
-        clean_parts = [re.sub(r'[^a-zA-Z0-9_]', '', str(p).upper().replace(' ', '_')) for p in parts]
-        raw_key = "_".join(clean_parts).encode('utf-8')
-        return hashlib.md5(raw_key).hexdigest()[:16]
+Cada loader, em uma **única transação**:
 
-    def detect_quarter_columns(self, header_row):
-        """Varre os trimestres parando na coluna vazia que antecede os anos cheios."""
-        quarters = []
-        for c_idx, val in header_row.items():
-            if pd.isna(val):
-                if len(quarters) > 0:
-                    break
-                continue
-            val_str = str(val).split('|')[0].strip()
-            match = re.search(r'([1-4]T\d{2})', val_str, re.IGNORECASE)
-            if match:
-                q_code = match.group(1).upper()
-                q_num = int(q_code[0])
-                yy = int(q_code[2:])
-                full_year = 2000 + yy if yy < 50 else 1900 + yy
-                m_end = q_num * 3
-                d_end = 31 if q_num in (1, 4) else 30
-                quarters.append({
-                    "col_idx": c_idx,
-                    "periodo_codigo": q_code,
-                    "ano": full_year,
-                    "trimestre": q_num,
-                    "data_fechamento": f"{full_year}-{m_end:02d}-{d_end:02d}"
-                })
-        return quarters
+1. grava o DataFrame em uma tabela de staging (`stg_*`);
+2. aplica `MERGE` (SQL Server) ou `INSERT ... ON CONFLICT DO UPDATE` (PostgreSQL) com projeção explícita de colunas;
+3. descarta a staging.
 
-    def find_section_bounds(self, df_fin):
-        """Localiza os limites das seções por âncoras de texto com asserção estrita."""
-        bounds = {}
-        for idx, val in df_fin['Unnamed: 2'].items():
-            if pd.isna(val):
-                continue
-            s = str(val).strip().lower()
-            if 'dre (r$ mil)' in s:
-                bounds['dre_start'] = idx + 1
-            elif s == 'ebitda':
-                bounds['ebitda_start'] = idx
-            elif 'balanço patrimonial (r$ mil)' in s:
-                bounds['dre_end'] = idx - 1
-                bounds['bp_start'] = idx + 1
-            elif 'fluxo de caixa (r$ mil)' in s:
-                bounds['bp_end'] = idx - 1
-                bounds['dfc_start'] = idx + 1
-            elif 'variação líquida de caixa e equivalentes de caixa' in s and 'dfc_start' in bounds and idx > 250:
-                bounds['dfc_end'] = idx
+Como a staging é criada dentro da mesma transação, uma falha na carga desfaz também a staging, sem deixar tabelas `stg_*` órfãs. As cargas são idempotentes: reexecutar com a mesma planilha não duplica linhas. O upsert da dimensão de contas atualiza todas as colunas não-chave; os das fatos atualizam `valor_*` e `data_carga`.
 
-        required_bounds = ['dre_start', 'ebitda_start', 'dre_end', 'bp_start', 'bp_end', 'dfc_start', 'dfc_end']
-        for rb in required_bounds:
-            assert rb in bounds, f"Falha de integridade: âncora textual para '{rb}' não foi localizada."
-        return bounds
+> **Limitação conhecida:** uma reapresentação de números pela RI (por exemplo, a reclassificação decorrente da venda da Bankly, nota 3 da planilha) sobrescreve os valores anteriores sem manter histórico de versões.
 
-    def parse_financial_statements(self, file_path):
-        """Extrai DRE, Balanço e DFC tratando colisões, subtotais e desagregação."""
-        df = pd.read_excel(file_path, sheet_name='Finan. Cons. | Finan. Cons.')
-        quarters = self.detect_quarter_columns(df.iloc[2])
-        bounds = self.find_section_bounds(df)
-
-        dim_contas = {}
-        fato_contabil = []
-        seen_keys = {}
-
-        current_sec = "HEADER"
-        current_sub = "GERAL"
-
-        ignore_exact_headers = {
-            'balanço patrimonial (r$ mil)', 'fluxo de caixa (r$ mil)', 'dre (r$ mil)',
-            'período acumulado', 'atividades operacionais', 'atividades de investimento',
-            'atividades de financiamento'
-        }
-
-        for r in range(bounds['dre_start'], bounds['dfc_end'] + 1):
-            raw_pt = df.iloc[r]['Unnamed: 2']
-            if pd.isna(raw_pt) or str(raw_pt).strip().startswith('¹') or str(raw_pt).strip().lower() == 'notas:':
-                continue
-
-            pt_str = str(raw_pt)
-            indent = len(pt_str) - len(pt_str.lstrip(' '))
-
-            # Limpeza: remove notas sobrescritas (¹²³⁴⁵⁶⁷⁸⁹⁰) e normaliza espaços
-            clean_pt = re.sub(r'[¹²³⁴⁵⁶⁷⁸⁹⁰]', '', pt_str).strip()
-            clean_pt = re.sub(r'\s+', ' ', clean_pt)
-            clean_lower = clean_pt.lower()
-
-            # -------------------------------------------------------------
-            # ETAPA 1: ATUALIZAÇÃO SEMÂNTICA DE ESTADO (SEÇÃO E SUBGRUPO)
-            # Processado ANTES de qualquer descarte para que os cabeçalhos
-            # definam corretamente o contexto dos próximos lançamentos.
-            # -------------------------------------------------------------
-            if r < bounds['ebitda_start']:
-                current_sec = "DRE"
-                current_sub = "RESULTADO_OPERACIONAL"
-            elif r <= bounds['dre_end']:
-                current_sec = "DRE"
-                current_sub = "CONCILIACAO_EBITDA"
-            elif r < bounds['dfc_start']:
-                current_sec = "BP"
-                if 'ativo circulante' in clean_lower and 'total' not in clean_lower:
-                    current_sub = "ATIVO_CIRCULANTE"
-                elif 'ativo não circulante' in clean_lower and 'total' not in clean_lower:
-                    current_sub = "ATIVO_NAO_CIRCULANTE"
-                elif 'realizável a longo prazo' in clean_lower and 'total' not in clean_lower:
-                    current_sub = "ATIVO_RLP"
-                elif clean_lower == 'investimentos':
-                    current_sub = "ATIVO_INVESTIMENTOS"
-                elif clean_lower == 'imobilizado':
-                    current_sub = "ATIVO_IMOBILIZADO"
-                elif clean_lower == 'intangível':
-                    current_sub = "ATIVO_INTANGIVEL"
-                elif 'passivo circulante' in clean_lower and 'total' not in clean_lower:
-                    current_sub = "PASSIVO_CIRCULANTE"
-                elif 'passivo não circulante' in clean_lower and 'total' not in clean_lower:
-                    current_sub = "PASSIVO_NAO_CIRCULANTE"
-                elif 'patrimônio líquido' in clean_lower and 'total' not in clean_lower and 'controladores' not in clean_lower:
-                    current_sub = "PATRIMONIO_LIQUIDO"
-            else:
-                current_sec = "DFC"
-                if 'atividades operacionais' in clean_lower and 'caixa' not in clean_lower:
-                    current_sub = "FLUXO_OPERACIONAL"
-                elif 'atividades de investimento' in clean_lower and 'caixa' not in clean_lower:
-                    current_sub = "FLUXO_INVESTIMENTO"
-                elif 'atividades de financiamento' in clean_lower and 'caixa' not in clean_lower:
-                    current_sub = "FLUXO_FINANCIAMENTO"
-                elif any(k in clean_lower for k in ['efeito de variação de câmbio', 'efeito de variacao de cambio', 'variação cambial s/ caixa']):
-                    current_sub = "EFEITO_CAMBIAL"
-                elif any(k in clean_lower for k in ['saldo inicial', 'no início do período', 'no início do exercício', 'saldo final', 'no final do período', 'no final do exercício']):
-                    current_sub = "SALDOS_CAIXA"
-                elif 'variação líquida de caixa' in clean_lower:
-                    if current_sub in ["FLUXO_FINANCIAMENTO", "FLUXO_INVESTIMENTO", "FLUXO_OPERACIONAL", "EFEITO_CAMBIAL"]:
-                        current_sub = "VARIACAO_CAIXA_PERIODO"
-                    else:
-                        current_sub = "VARIACAO_CAIXA_TOTAL"
-
-            # -------------------------------------------------------------
-            # ETAPA 2: DESCARTE DE CABEÇALHOS TEXTUAIS
-            # -------------------------------------------------------------
-            if clean_lower in ignore_exact_headers:
-                continue
-
-            # -------------------------------------------------------------
-            # ETAPA 3: RESOLUÇÃO DE IDENTIFICADOR ÚNICO E DETERMINÍSTICO
-            # -------------------------------------------------------------
-            base_key = f"{current_sec}_{current_sub}_{clean_pt.upper()}"
-            seen_keys[base_key] = seen_keys.get(base_key, 0) + 1
-            occ = seen_keys[base_key]
-            unique_key_parts = [current_sec, current_sub, clean_pt] if occ == 1 else [current_sec, current_sub, clean_pt, str(occ)]
-            id_conta = self.generate_hash_id(unique_key_parts)
-
-            # Classificação do Tipo de Conta
-            if current_sub == "CONCILIACAO_EBITDA":
-                tipo_conta = "Gerencial"
-            elif any(k in clean_lower for k in [
-                'resultado bruto', 'total do ativo', 'total do passivo', 'total do patrimônio',
-                'lucro líquido', 'caixa líquido', 'variação líquida',
-                'resultado ajustado', 'no final do exercício', 'no início do exercício',
-                'no final do período', 'no início do período', 'custos e despesas operacionais',
-                'patrimônio líquido atribuído a controladores'
-            ]):
-                tipo_conta = "Sintética"
-            elif current_sec == "DRE" and any(k in clean_lower for k in ['lucro (prejuízo) antes', 'resultado do período antes dos tributos', 'resultado antes dos tributos']):
-                tipo_conta = "Sintética"
-            elif current_sec == "DFC" and clean_lower == 'resultado do período antes dos tributos sobre o lucro':
-                # Subtotal (continuidade + descontinuadas): evita contar o ponto de partida duas vezes na ponte do caixa operacional
-                tipo_conta = "Sintética"
-            elif clean_pt == "Cashback" and current_sec == "DRE":
-                tipo_conta = "Sintética"
-            else:
-                # As linhas filhas do ponto de partida da DFC (continuidade e descontinuadas) permanecem como Analítica para compor a ponte do fluxo operacional
-                tipo_conta = "Analítica"
-
-            # Coleta temporal dos dados numéricos
-            series_vals = {}
-            numeric_samples = []
-            for q in quarters:
-                val = df.iloc[r][q["col_idx"]]
-                try:
-                    num_val = float(val) if pd.notna(val) else None
-                except (ValueError, TypeError):
-                    num_val = None
-                series_vals[q["periodo_codigo"]] = num_val
-                if num_val is not None:
-                    numeric_samples.append(num_val)
-
-            mean_val = (sum(numeric_samples) / len(numeric_samples)) if numeric_samples else 0.0
-            natureza_sinal = -1 if mean_val < 0 else 1
-
-            nivel = 2 if indent > 0 else 1
-            dim_contas[id_conta] = {
-                "id_conta": id_conta,
-                "demonstrativo": current_sec,
-                "secao_contabil": current_sec,
-                "subgrupo": current_sub,
-                "descricao_conta": clean_pt,
-                "tipo_conta": tipo_conta,
-                "nivel_hierarquia": nivel,
-                "ordem_exibicao": r * 10,
-                "natureza_sinal": natureza_sinal
-            }
-
-            # Desagregação da DFC, Tratamento de Estoque e Acumulação da DRE
-            running_dre_ytd = 0.0
-            current_dre_year = None
-
-            for idx, q in enumerate(quarters):
-                p_code = q["periodo_codigo"]
-                cur_val = series_vals[p_code]
-                v_discreto = cur_val
-                v_ytd = cur_val
-
-                if current_sec == "DRE":
-                    if q["ano"] != current_dre_year:
-                        current_dre_year = q["ano"]
-                        running_dre_ytd = 0.0
-
-                    if cur_val is not None:
-                        running_dre_ytd += cur_val
-                        v_discreto = cur_val
-                        v_ytd = running_dre_ytd
-                    else:
-                        v_discreto = None
-                        v_ytd = None
-
-                elif current_sec == "DFC":
-                    if current_sub == "SALDOS_CAIXA":
-                        # Saldos de caixa representam estoque financeiro (análogo ao Balanço Patrimonial)
-                        v_discreto = cur_val
-                        v_ytd = cur_val
-                    else:
-                        # 2019 e primeiros trimestres de 2020 não possuem apuração na série
-                        if q["ano"] < 2020 or (q["ano"] == 2020 and q["trimestre"] in [1, 2]):
-                            v_discreto = None
-                            v_ytd = None
-                        elif q["ano"] == 2020 and q["trimestre"] == 3:
-                            # 3T20 reflete acumulado de 9M sem base discreta anterior
-                            v_discreto = None
-                            v_ytd = cur_val
-                        elif cur_val is not None:
-                            v_ytd = cur_val
-                            if q["trimestre"] == 1:
-                                v_discreto = cur_val
-                            else:
-                                prev_code = quarters[idx - 1]["periodo_codigo"]
-                                prev_val = series_vals.get(prev_code)
-                                v_discreto = (cur_val - prev_val) if prev_val is not None else None
-
-                elif current_sec == "BP":
-                    v_discreto = cur_val
-                    v_ytd = cur_val
-
-                fato_contabil.append({
-                    "id_conta": id_conta,
-                    "data_fechamento": q["data_fechamento"],
-                    "periodo_codigo": p_code,
-                    "valor_discreto": v_discreto,
-                    "valor_ytd": v_ytd
-                })
-
-        return pd.DataFrame(list(dim_contas.values())), pd.DataFrame(fato_contabil)
-
-    def parse_operational_indicators(self, file_path):
-        """Extrai métricas operacionais e da tesouraria de Bitcoin com sanitização de zeros."""
-        xls = pd.ExcelFile(file_path)
-        df_op = pd.read_excel(xls, sheet_name='Dados Oper. | Oper. Data')
-        df_btc = pd.read_excel(xls, sheet_name='Bitcoin Tesou. | Bitcoin Treas.')
-        quarters = self.detect_quarter_columns(df_op.iloc[2])
-
-        dim_metricas = [
-            {"id_metrica": "GMV_SHOPPING_BRASIL", "categoria": "SHOPPING", "subgrupo": "ECOMMERCE", "nome_metrica": "GMV Shopping Brasil", "unidade_medida": "R$ MIL", "row": 5, "source": "OP"},
-            {"id_metrica": "TAKE_RATE_BRUTO", "categoria": "SHOPPING", "subgrupo": "MONETIZACAO", "nome_metrica": "Take Rate Méliuz", "unidade_medida": "%", "row": 7, "source": "OP"},
-            {"id_metrica": "TAKE_RATE_LIQUIDO", "categoria": "SHOPPING", "subgrupo": "MONETIZACAO", "nome_metrica": "Net Take Rate Méliuz", "unidade_medida": "%", "row": 9, "source": "OP"},
-            {"id_metrica": "CONTAS_TOTAIS", "categoria": "USUARIOS", "subgrupo": "BASE", "nome_metrica": "Contas Totais Méliuz", "unidade_medida": "MILHARES", "row": 11, "source": "OP"},
-            {"id_metrica": "CONTAS_DIGITAIS_BV", "categoria": "SERVICOS_FINANCEIROS", "subgrupo": "PARCERIA_BV", "nome_metrica": "Contas Digitais Abertas BV", "unidade_medida": "UNIDADES", "row": 15, "source": "OP"},
-            {"id_metrica": "CARTOES_EMITIDOS_BV", "categoria": "SERVICOS_FINANCEIROS", "subgrupo": "PARCERIA_BV", "nome_metrica": "Cartões Emitidos BV", "unidade_medida": "UNIDADES", "row": 16, "source": "OP"},
-            {"id_metrica": "TPV_BANCO_BV", "categoria": "SERVICOS_FINANCEIROS", "subgrupo": "PARCERIA_BV", "nome_metrica": "TPV Parceria BV", "unidade_medida": "R$ MIL", "row": 17, "source": "OP"},
-            {"id_metrica": "TPV_LEGADO", "categoria": "SERVICOS_FINANCEIROS", "subgrupo": "LEGADO", "nome_metrica": "TPV Operação Legada", "unidade_medida": "R$ MIL", "row": 20, "source": "OP"},
-            {"id_metrica": "BTC_POSICAO_ACUMULADA", "categoria": "BITCOIN", "subgrupo": "TESOURARIA", "nome_metrica": "Posição Bitcoin em Tesouraria", "unidade_medida": "BTC", "row": 4, "source": "BTC"},
-            {"id_metrica": "BTC_PRECO_MEDIO_USD", "categoria": "BITCOIN", "subgrupo": "TESOURARIA", "nome_metrica": "Preço Médio de Compra Bitcoin", "unidade_medida": "USD", "row": 6, "source": "BTC"},
-            {"id_metrica": "BTC_SATS_POR_ACAO", "categoria": "BITCOIN", "subgrupo": "TESOURARIA", "nome_metrica": "Sats por Ação", "unidade_medida": "SATS", "row": 10, "source": "BTC"},
-            {"id_metrica": "BTC_GAIN_BRL_MI", "categoria": "BITCOIN", "subgrupo": "TESOURARIA", "nome_metrica": "Bitcoin Gain", "unidade_medida": "R$ MILHOES", "row": 16, "source": "BTC"}
-        ]
-
-        fato_metricas = []
-        for m in dim_metricas:
-            target_df = df_op if m["source"] == "OP" else df_btc
-            for q in quarters:
-                col_match = None
-                for c_col, c_val in target_df.iloc[2].items():
-                    if pd.notna(c_val) and q["periodo_codigo"] in str(c_val):
-                        col_match = c_col
-                        break
-
-                if col_match is not None:
-                    val = target_df.iloc[m["row"]][col_match]
-                    try:
-                        num_val = float(val) if pd.notna(val) else None
-                    except (ValueError, TypeError):
-                        num_val = None
-
-                    # Sanitização de zeros em períodos sem apuração
-                    if m["id_metrica"] in ["TAKE_RATE_BRUTO", "TAKE_RATE_LIQUIDO"] and q["ano"] == 2019 and num_val == 0.0:
-                        num_val = None
-
-                    if num_val is not None:
-                        fato_metricas.append({
-                            "id_metrica": m["id_metrica"],
-                            "data_fechamento": q["data_fechamento"],
-                            "periodo_codigo": q["periodo_codigo"],
-                            "valor_metrica": num_val
-                        })
-
-        df_dim_m = pd.DataFrame(dim_metricas).drop(columns=["row", "source"])
-        return df_dim_m, pd.DataFrame(fato_metricas)
-
-    def execute_upsert(self, df_dim_c, df_fato_c, df_dim_m, df_fato_m):
-        """Executa carga em lote com declaração explícita de colunas no SQL."""
-        if not self.engine:
-            logging.info("Engine não conectada. Modo dry-run concluído.")
-            return
-
-        df_dim_c.to_sql("stg_dim_plano_contas", self.engine, if_exists="replace", index=False)
-        df_fato_c.to_sql("stg_fato_movimento_contabil", self.engine, if_exists="replace", index=False)
-        df_dim_m.to_sql("stg_dim_metrica_operacional", self.engine, if_exists="replace", index=False)
-        df_fato_m.to_sql("stg_fato_indicadores_operacionais", self.engine, if_exists="replace", index=False)
-
-        with self.engine.begin() as conn:
-            if self.db_type == "postgresql":
-                conn.execute(text("""
-                    INSERT INTO dim_plano_contas (
-                        id_conta, demonstrativo, secao_contabil, subgrupo, descricao_conta, 
-                        tipo_conta, nivel_hierarquia, ordem_exibicao, natureza_sinal
-                    )
-                    SELECT 
-                        id_conta, demonstrativo, secao_contabil, subgrupo, descricao_conta, 
-                        tipo_conta, nivel_hierarquia, ordem_exibicao, natureza_sinal 
-                    FROM stg_dim_plano_contas
-                    ON CONFLICT (id_conta) DO UPDATE SET 
-                        descricao_conta = EXCLUDED.descricao_conta,
-                        tipo_conta = EXCLUDED.tipo_conta,
-                        subgrupo = EXCLUDED.subgrupo,
-                        ordem_exibicao = EXCLUDED.ordem_exibicao,
-                        natureza_sinal = EXCLUDED.natureza_sinal;
-
-                    INSERT INTO fato_movimento_contabil (
-                        id_conta, data_fechamento, periodo_codigo, valor_discreto, valor_ytd
-                    )
-                    SELECT 
-                        id_conta, CAST(data_fechamento AS DATE), periodo_codigo, valor_discreto, valor_ytd 
-                    FROM stg_fato_movimento_contabil
-                    ON CONFLICT (id_conta, data_fechamento) DO UPDATE SET 
-                        valor_discreto = EXCLUDED.valor_discreto,
-                        valor_ytd = EXCLUDED.valor_ytd,
-                        data_carga = NOW();
-
-                    INSERT INTO dim_metrica_operacional (id_metrica, categoria, subgrupo, nome_metrica, unidade_medida)
-                    SELECT id_metrica, categoria, subgrupo, nome_metrica, unidade_medida FROM stg_dim_metrica_operacional
-                    ON CONFLICT (id_metrica) DO NOTHING;
-
-                    INSERT INTO fato_indicadores_operacionais (id_metrica, data_fechamento, periodo_codigo, valor_metrica)
-                    SELECT id_metrica, CAST(data_fechamento AS DATE), periodo_codigo, valor_metrica 
-                    FROM stg_fato_indicadores_operacionais
-                    WHERE valor_metrica IS NOT NULL
-                    ON CONFLICT (id_metrica, data_fechamento) DO UPDATE SET 
-                        valor_metrica = EXCLUDED.valor_metrica,
-                        data_carga = NOW();
-                """))
-            elif self.db_type == "sqlserver":
-                conn.execute(text("""
-                    MERGE INTO dim_plano_contas AS t 
-                    USING stg_dim_plano_contas AS s ON t.id_conta = s.id_conta
-                    WHEN MATCHED THEN 
-                        UPDATE SET 
-                            t.descricao_conta = s.descricao_conta, 
-                            t.tipo_conta = s.tipo_conta, 
-                            t.subgrupo = s.subgrupo,
-                            t.ordem_exibicao = s.ordem_exibicao,
-                            t.natureza_sinal = s.natureza_sinal
-                    WHEN NOT MATCHED THEN 
-                        INSERT (id_conta, demonstrativo, secao_contabil, subgrupo, descricao_conta, tipo_conta, nivel_hierarquia, ordem_exibicao, natureza_sinal)
-                        VALUES (s.id_conta, s.demonstrativo, s.secao_contabil, s.subgrupo, s.descricao_conta, s.tipo_conta, s.nivel_hierarquia, s.ordem_exibicao, s.natureza_sinal);
-
-                    MERGE INTO fato_movimento_contabil AS t 
-                    USING stg_fato_movimento_contabil AS s 
-                    ON t.id_conta = s.id_conta AND t.data_fechamento = s.data_fechamento
-                    WHEN MATCHED THEN 
-                        UPDATE SET 
-                            t.valor_discreto = s.valor_discreto, 
-                            t.valor_ytd = s.valor_ytd, 
-                            t.data_carga = GETDATE()
-                    WHEN NOT MATCHED THEN 
-                        INSERT (id_conta, data_fechamento, periodo_codigo, valor_discreto, valor_ytd, data_carga)
-                        VALUES (s.id_conta, s.data_fechamento, s.periodo_codigo, s.valor_discreto, s.valor_ytd, GETDATE());
-
-                    MERGE INTO dim_metrica_operacional AS t 
-                    USING stg_dim_metrica_operacional AS s ON t.id_metrica = s.id_metrica
-                    WHEN NOT MATCHED THEN 
-                        INSERT (id_metrica, categoria, subgrupo, nome_metrica, unidade_medida)
-                        VALUES (s.id_metrica, s.categoria, s.subgrupo, s.nome_metrica, s.unidade_medida);
-
-                    MERGE INTO fato_indicadores_operacionais AS t 
-                    USING (SELECT * FROM stg_fato_indicadores_operacionais WHERE valor_metrica IS NOT NULL) AS s
-                    ON t.id_metrica = s.id_metrica AND t.data_fechamento = s.data_fechamento
-                    WHEN MATCHED THEN 
-                        UPDATE SET 
-                            t.valor_metrica = s.valor_metrica, 
-                            t.data_carga = GETDATE()
-                    WHEN NOT MATCHED THEN 
-                        INSERT (id_metrica, data_fechamento, periodo_codigo, valor_metrica, data_carga)
-                        VALUES (s.id_metrica, s.data_fechamento, s.periodo_codigo, s.valor_metrica, GETDATE());
-                """))
-        logging.info("Upsert atômico concluído com sucesso.")
-
-if __name__ == "__main__":
-    pipeline = MeliuzETLPipeline(data_folder="./")
-    arquivo = pipeline.get_latest_file()
-    dim_c, fato_c = pipeline.parse_financial_statements(arquivo)
-    dim_m, fato_m = pipeline.parse_operational_indicators(arquivo)
-    pipeline.execute_upsert(dim_c, fato_c, dim_m, fato_m)
-
-```
+---
 
 ## 6. Modelagem Tabular e DAX (Power BI)
 
@@ -910,3 +532,31 @@ Com essa abordagem, cada linha assume uma assinatura única (permitindo classifi
   * Recebimento pela Venda de Bitcoin (DFC Investimento YTD 9M26): **R\$ 29.350 mil**.
 
   * Posição em Bitcoin em Tesouraria (3T26): **526,69 BTC**.
+
+### 7.1 Reconciliações automatizadas
+
+A pasta `tests/` valida a saída do extrator contra identidades contábeis, a cada execução de `pytest` (e pelo workflow de CI em `.github/workflows`). Principais verificações:
+
+* **Balanço:** ativo = passivo + patrimônio líquido; ativo = circulante + não circulante; subtotais = soma das contas analíticas.
+* **DRE:** receita + custos = resultado bruto; cadeia até o lucro líquido; custos = soma dos componentes; EBITDA e EBITDA ajustado; YTD do 4T = soma dos quatro trimestres = coluna anual da própria planilha.
+* **DFC:** caixa operacional + investimento + financiamento + câmbio = variação líquida de caixa; saldo inicial + variação = saldo final; saldo inicial do ano = saldo final do 4T anterior; fluxos anuais = YTD do 4T.
+* **Cruzadas:** o resultado antes dos tributos da DRE é igual ao da DFC **das operações em continuidade** (a linha consolidada da DFC inclui operações descontinuadas); o caixa final da DFC é igual ao caixa do balanço, ajustado pelo caixa de operações descontinuadas (a seguir).
+* **Bitcoin:** a queda da posição em BTC coincide com o recebimento pela venda de Bitcoin na DFC, e o preço médio de compra não muda na venda.
+* **Integridade:** 31 trimestres contíguos (1T19 a 3T26), sem chaves duplicadas, sem fato órfão, valores dentro da precisão do DDL, rótulos sem dígito de nota.
+
+A tolerância é de 1,5 (R\$ mil) e cobre apenas o arredondamento da própria fonte.
+
+#### Caixa da DFC versus caixa do balanço em 2T23 e 3T23
+
+Nesses dois trimestres o caixa final da DFC consolidada excede o "Caixa e equivalentes de caixa" do balanço. A causa, conferida nos ITRs (nota 3.a e nota 8), é a reclassificação, por força do CPC 31 / IFRS 5, do caixa da Bankly e da Acessopar para "ativo mantido para venda" após o acordo de venda ao Banco BV (1º de junho de 2023): o balanço o exclui do caixa, mas a DFC o mantém no saldo final.
+
+| Trimestre | Caixa no balanço (R\$ mil) | Caixa de operações descontinuadas (R\$ mil) | Saldo final da DFC (R\$ mil) |
+|---|---|---|---|
+| 2T23 | 59.704 | 11.854 (Bankly 11.669 + Acessopar 185) | 71.558 |
+| 3T23 | 165.689 | 92.949 (Bankly 92.767 + Acessopar 182) | 258.638 |
+
+Não se trata de erro da planilha nem do pipeline. Os testes incorporam esse ajuste de forma explícita e falham se ele deixar de ser necessário.
+
+#### Conferência dos parâmetros do 3T26
+
+Os valores da lista de parâmetros acima (receita, lucro líquido, caixa operacional, caixa de financiamento, recebimento pela venda de Bitcoin e posição em Bitcoin) foram conferidos no ITR consolidado do 3T26.
