@@ -33,13 +33,13 @@ class TestEstruturaOperacional:
         dim, fato = operacional
         assert set(fato.id_metrica) <= set(dim.id_metrica)
 
-    def test_metricas_de_base_cobrem_toda_a_serie(self, operacional):
+    def test_metricas_de_base_cobrem_toda_a_serie(self, operacional, contabil):
         for m in ["GMV_SHOPPING_BRASIL", "CONTAS_TOTAIS"]:
-            assert len(serie(operacional, m)) == 31, m
+            assert set(serie(operacional, m).index) == set(contabil[1].periodo_codigo), m
 
-    def test_bitcoin_cobre_1t25_a_3t26(self, operacional):
+    def test_bitcoin_cobre_desde_1t25(self, operacional, contabil):
         s = serie(operacional, "BTC_POSICAO_ACUMULADA")
-        assert list(s.index) == ["1T25", "2T25", "3T25", "4T25", "1T26", "2T26", "3T26"]
+        assert list(s.index) == list(contabil[1].loc[contabil[1].data_fechamento >= "2025-03-31", "periodo_codigo"].drop_duplicates())
 
 
 class TestValoresOperacionais:

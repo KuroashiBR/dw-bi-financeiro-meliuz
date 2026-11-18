@@ -17,3 +17,37 @@ jobs:
           cache-dependency-path: requirements-dev.txt
       - run: pip install -r requirements-dev.txt
       - run: pytest
+
+  postgresql:
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: teste
+          POSTGRES_DB: dwmeliuz
+        ports:
+          - 5432:5432
+        options: --health-cmd pg_isready --health-interval 3s --health-timeout 3s --health-retries 20
+    env:
+      DW_DB_TYPE: postgresql
+      DW_DB_PASSWORD: teste
+      PGPASSWORD: teste
+      PGHOST: localhost
+      PGUSER: postgres
+      PGDATABASE: dwmeliuz
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r etl/requirements.txt
+      - name: Criar o banco e conferir duas cargas da mesma planilha
+        run: |
+          psql -v ON_ERROR_STOP=1 -f database/postgresql/01_ddl_schema.sql -f database/postgresql/02_views_analiticas.sql
+          consulta='SELECT (SELECT count(*) FROM vw_analise_contabil_consolidada), (SELECT count(*) FROM vw_analise_indicadores_operacionais)'
+          python etl/main.py
+          primeira=$(psql -Atc "$consulta")
+          [[ "$primeira" =~ ^[1-9][0-9]*\|[1-9][0-9]*$ ]]
+          python etl/main.py
+          test "$primeira" = "$(psql -Atc "$consulta")"

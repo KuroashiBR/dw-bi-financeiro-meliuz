@@ -31,14 +31,18 @@ def _casas(v: pd.Series, escala: int) -> pd.Series:
     return v[(v - v.round(escala)).abs() > 1e-9]
 
 
-PERIODOS = [f"{q}T{a % 100:02d}" for a in range(2019, 2027) for q in range(1, 5)][:31]  # 1T19..3T26
 FIM_DO_TRIMESTRE = {"1": "03-31", "2": "06-30", "3": "09-30", "4": "12-31"}
 
 
 class TestEstrutura:
-    def test_trimestres_contiguos_de_1t19_a_3t26(self, contabil):
+    def test_trimestres_contiguos_desde_1t19(self, contabil, planilha_bruta):
         _, fato = contabil
-        assert sorted(fato.periodo_codigo.unique(), key=lambda p: (ano_do_periodo(p), p[0])) == PERIODOS
+        publicados = [str(v).split("|")[0].strip() for v in planilha_bruta.iloc[2]]
+        publicados = [p for p in publicados if re.fullmatch(r"[1-4]T\d{2}", p)]
+        assert len(publicados) >= 31
+        esperados = [f"{i % 4 + 1}T{(19 + i // 4):02d}" for i in range(len(publicados))]
+        assert publicados == esperados
+        assert set(fato.periodo_codigo) == set(esperados)
 
     def test_data_de_fechamento_compativel_com_periodo(self, contabil):
         _, fato = contabil
@@ -62,7 +66,7 @@ class TestEstrutura:
     def test_cada_conta_tem_um_registro_por_trimestre(self, contabil):
         _, fato = contabil
         contagem = fato.groupby("id_conta").size()
-        assert (contagem == len(PERIODOS)).all(), contagem[contagem != len(PERIODOS)].to_dict()
+        assert (contagem == fato.periodo_codigo.nunique()).all(), contagem[contagem != fato.periodo_codigo.nunique()].to_dict()
 
     def test_dominios_da_dimensao(self, contabil):
         dim, _ = contabil
