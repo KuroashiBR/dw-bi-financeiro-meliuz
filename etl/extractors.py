@@ -299,18 +299,18 @@ def extract_operational_indicators(file_path: str) -> tuple[pd.DataFrame, pd.Dat
     quarters = detect_quarter_columns(df_op.iloc[2])
 
     dim_metricas = [
-        {"id_metrica": "GMV_SHOPPING_BRASIL", "categoria": "SHOPPING", "subgrupo": "ECOMMERCE", "nome_metrica": "GMV Shopping Brasil", "unidade_medida": "R$ MIL", "row": 5, "source": "OP"},
-        {"id_metrica": "TAKE_RATE_BRUTO", "categoria": "SHOPPING", "subgrupo": "MONETIZACAO", "nome_metrica": "Take Rate Méliuz", "unidade_medida": "%", "row": 7, "source": "OP"},
-        {"id_metrica": "TAKE_RATE_LIQUIDO", "categoria": "SHOPPING", "subgrupo": "MONETIZACAO", "nome_metrica": "Net Take Rate Méliuz", "unidade_medida": "%", "row": 9, "source": "OP"},
-        {"id_metrica": "CONTAS_TOTAIS", "categoria": "USUARIOS", "subgrupo": "BASE", "nome_metrica": "Contas Totais Méliuz", "unidade_medida": "MILHARES", "row": 11, "source": "OP"},
-        {"id_metrica": "CONTAS_DIGITAIS_BV", "categoria": "SERVICOS_FINANCEIROS", "subgrupo": "PARCERIA_BV", "nome_metrica": "Contas Digitais Abertas BV", "unidade_medida": "UNIDADES", "row": 15, "source": "OP"},
-        {"id_metrica": "CARTOES_EMITIDOS_BV", "categoria": "SERVICOS_FINANCEIROS", "subgrupo": "PARCERIA_BV", "nome_metrica": "Cartões Emitidos BV", "unidade_medida": "UNIDADES", "row": 16, "source": "OP"},
-        {"id_metrica": "TPV_BANCO_BV", "categoria": "SERVICOS_FINANCEIROS", "subgrupo": "PARCERIA_BV", "nome_metrica": "TPV Parceria BV", "unidade_medida": "R$ MIL", "row": 17, "source": "OP"},
-        {"id_metrica": "TPV_LEGADO", "categoria": "SERVICOS_FINANCEIROS", "subgrupo": "LEGADO", "nome_metrica": "TPV Operação Legada", "unidade_medida": "R$ MIL", "row": 20, "source": "OP"},
-        {"id_metrica": "BTC_POSICAO_ACUMULADA", "categoria": "BITCOIN", "subgrupo": "TESOURARIA", "nome_metrica": "Posição Bitcoin em Tesouraria", "unidade_medida": "BTC", "row": 4, "source": "BTC"},
-        {"id_metrica": "BTC_PRECO_MEDIO_USD", "categoria": "BITCOIN", "subgrupo": "TESOURARIA", "nome_metrica": "Preço Médio de Compra Bitcoin", "unidade_medida": "USD", "row": 6, "source": "BTC"},
-        {"id_metrica": "BTC_SATS_POR_ACAO", "categoria": "BITCOIN", "subgrupo": "TESOURARIA", "nome_metrica": "Sats por Ação", "unidade_medida": "SATS", "row": 10, "source": "BTC"},
-        {"id_metrica": "BTC_GAIN_BRL_MI", "categoria": "BITCOIN", "subgrupo": "TESOURARIA", "nome_metrica": "Bitcoin Gain", "unidade_medida": "R$ MILHOES", "row": 16, "source": "BTC"}
+        {"id_metrica": "GMV_SHOPPING_BRASIL", "categoria": "SHOPPING", "subgrupo": "ECOMMERCE", "nome_metrica": "GMV Shopping Brasil", "unidade_medida": "R$ MIL", "label": "GMV Shopping Brasil (R$ mil)", "source": "OP"},
+        {"id_metrica": "TAKE_RATE_BRUTO", "categoria": "SHOPPING", "subgrupo": "MONETIZACAO", "nome_metrica": "Take Rate Méliuz", "unidade_medida": "%", "label": "Take rate Méliuz (%)", "source": "OP"},
+        {"id_metrica": "TAKE_RATE_LIQUIDO", "categoria": "SHOPPING", "subgrupo": "MONETIZACAO", "nome_metrica": "Net Take Rate Méliuz", "unidade_medida": "%", "label": "Net take rate Méliuz (%)", "source": "OP"},
+        {"id_metrica": "CONTAS_TOTAIS", "categoria": "USUARIOS", "subgrupo": "BASE", "nome_metrica": "Contas Totais Méliuz", "unidade_medida": "MILHARES", "label": "Contas totais Méliuz (# mil)", "source": "OP"},
+        {"id_metrica": "CONTAS_DIGITAIS_BV", "categoria": "SERVICOS_FINANCEIROS", "subgrupo": "PARCERIA_BV", "nome_metrica": "Contas Digitais Abertas BV", "unidade_medida": "UNIDADES", "label": "Contas digitais abertas - acumulado (#)", "source": "OP"},
+        {"id_metrica": "CARTOES_EMITIDOS_BV", "categoria": "SERVICOS_FINANCEIROS", "subgrupo": "PARCERIA_BV", "nome_metrica": "Cartões Emitidos BV", "unidade_medida": "UNIDADES", "label": "Cartão de crédito emitidos - acumulado (#)", "source": "OP"},
+        {"id_metrica": "TPV_BANCO_BV", "categoria": "SERVICOS_FINANCEIROS", "subgrupo": "PARCERIA_BV", "nome_metrica": "TPV Parceria BV", "unidade_medida": "R$ MIL", "label": "TPV (R$ mil)", "source": "OP", "section": "Operação Parceria Banco BV"},
+        {"id_metrica": "TPV_LEGADO", "categoria": "SERVICOS_FINANCEIROS", "subgrupo": "LEGADO", "nome_metrica": "TPV Operação Legada", "unidade_medida": "R$ MIL", "label": "TPV (R$ mil)", "source": "OP", "section": "Operação legado"},
+        {"id_metrica": "BTC_POSICAO_ACUMULADA", "categoria": "BITCOIN", "subgrupo": "TESOURARIA", "nome_metrica": "Posição Bitcoin em Tesouraria", "unidade_medida": "BTC", "label": "Posição de Bitcoin acumulado(#)", "source": "BTC"},
+        {"id_metrica": "BTC_PRECO_MEDIO_USD", "categoria": "BITCOIN", "subgrupo": "TESOURARIA", "nome_metrica": "Preço Médio de Compra Bitcoin", "unidade_medida": "USD", "label": "Preço médio de compra acumulado (US$)", "source": "BTC"},
+        {"id_metrica": "BTC_SATS_POR_ACAO", "categoria": "BITCOIN", "subgrupo": "TESOURARIA", "nome_metrica": "Sats por Ação", "unidade_medida": "SATS", "label": "Sats por ação (#)", "source": "BTC"},
+        {"id_metrica": "BTC_GAIN_BRL_MI", "categoria": "BITCOIN", "subgrupo": "TESOURARIA", "nome_metrica": "Bitcoin Gain", "unidade_medida": "R$ MILHOES", "label": "Bitcoin Gain (R$ milhões)", "source": "BTC"}
     ]
 
     TAKE_RATES = ("TAKE_RATE_BRUTO", "TAKE_RATE_LIQUIDO")
@@ -319,6 +319,14 @@ def extract_operational_indicators(file_path: str) -> tuple[pd.DataFrame, pd.Dat
     fato_metricas = []
     for m in dim_metricas:
         target_df = df_op if m["source"] == "OP" else df_btc
+        labels = target_df.iloc[:, 2].astype(str).str.replace(r'[¹²³⁴⁵⁶⁷⁸⁹⁰]', '', regex=True).str.strip()
+        matches = labels.eq(m["label"])
+        if "section" in m:
+            sections = labels.where(labels.isin(["Operação Parceria Banco BV", "Operação legado"])).ffill()
+            matches &= sections.eq(m["section"])
+        rows = target_df.index[matches]
+        if len(rows) != 1:
+            raise ValueError(f"Esperada uma linha para {m['id_metrica']}, encontradas {len(rows)}. Confira o layout do RI.")
         for q in quarters:
             col_match = None
             for c_col, c_val in target_df.iloc[2].items():
@@ -327,7 +335,7 @@ def extract_operational_indicators(file_path: str) -> tuple[pd.DataFrame, pd.Dat
                     break
 
             if col_match is not None:
-                val = target_df.iloc[m["row"]][col_match]
+                val = target_df.at[rows[0], col_match]
                 try:
                     num_val = float(val) if pd.notna(val) else None
                 except (ValueError, TypeError):
@@ -347,5 +355,5 @@ def extract_operational_indicators(file_path: str) -> tuple[pd.DataFrame, pd.Dat
                         "valor_metrica": _arredonda(num_val, CASAS_VALOR_METRICA)
                     })
 
-    df_dim_m = pd.DataFrame(dim_metricas).drop(columns=["row", "source"])
+    df_dim_m = pd.DataFrame(dim_metricas).drop(columns=["label", "source", "section"])
     return df_dim_m, pd.DataFrame(fato_metricas)

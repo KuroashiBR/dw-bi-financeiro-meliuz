@@ -327,7 +327,7 @@ Nenhuma credencial é versionada. O arquivo `.env` é ignorado pelo git.
 * **`id_conta`:** MD5 (16 primeiros caracteres hexadecimais) de `seção + subgrupo + rótulo`. Rótulos repetidos no mesmo subgrupo recebem um contador de ocorrência na ordem em que aparecem na planilha. **Consequência:** renomear um rótulo na fonte ou inserir uma linha repetida acima de outra altera ids; o pipeline não mantém tabela de equivalência.
 * **Valor discreto e YTD:** DRE (fluxo, valor nativo é o discreto, YTD é a soma acumulada intra-anual), DFC (valor nativo é o YTD, o discreto é o delta trimestral, conforme seção 3.3), BP e saldos de caixa (estoque: discreto = YTD). Regras de `NULL` para séries incompletas na seção 3.3.
 * **Precisão:** valores contábeis arredondados a 5 casas e métricas a 10, como descrito na seção 3.3.
-* **Métricas operacionais (`extract_operational_indicators`):** o mapeamento entre métrica e linha da planilha é **posicional** (índices de linha fixos no código, para a aba operacional e para a de Bitcoin). Se a RI inserir ou mover linhas, esse mapeamento precisa ser revisto.
+* **Métricas operacionais (`extract_operational_indicators`):** o extrator identifica cada métrica pelo rótulo da fonte. Para o TPV, usa também o bloco da parceria BV ou da operação legada. Rótulos ausentes ou ambíguos interrompem a extração.
 
 ### 5.4 Carga (`loaders.py`)
 

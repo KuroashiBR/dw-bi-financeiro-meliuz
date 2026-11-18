@@ -93,4 +93,29 @@ pytest
 ```
 The suite runs the extractor against the spreadsheet in `data/` (no database required) and checks accounting identities (assets = liabilities + equity, income statement chain, cash flow sums, DFC vs. balance sheet cash) and structural integrity. To test a new spreadsheet before copying it to `data/`: `DW_XLSX=<path> pytest`. / A suíte roda o extrator sobre a planilha em `data/` (sem banco) e confere identidades contábeis e a integridade estrutural.
 
-> The SQL (`MERGE` / `UPSERT`, views, DDL) is not covered by automated tests: validate it against your database after the first load. / O SQL (`MERGE`/`UPSERT`, views, DDL) não é coberto por testes automatizados: valide no seu banco após a primeira carga.
+> O workflow de integração cria as tabelas e views em PostgreSQL e compara as contagens após duas cargas. A execução em SQL Server requer validação em uma instância desse banco.
+
+### Reproduzir e consultar o banco com PostgreSQL local
+
+Na raiz do projeto, copie `.env.example` para `.env`. Defina `DW_DB_TYPE=postgresql`, `DW_DB_USER=postgres` e uma senha local em `DW_DB_PASSWORD`. Com Docker Compose e Python instalados, execute:
+
+```sh
+docker compose up -d --wait
+python -m pip install -r requirements-dev.txt
+python -m pytest -q
+python etl/main.py
+docker compose exec db psql -U postgres -d dwmeliuz
+```
+
+O primeiro início do volume cria as tabelas e views. Na sessão SQL, consulte a série de receita trimestral:
+
+```sql
+SELECT periodo_codigo, valor_discreto AS receita_trimestral_em_mil_reais
+FROM vw_analise_contabil_consolidada
+WHERE demonstrativo = 'DRE' AND descricao_conta = 'Receita operacional líquida'
+ORDER BY data_fechamento;
+```
+
+O mesmo banco pode ser aberto no DBeaver ou Power BI em `localhost:5432`, banco `dwmeliuz`, com o usuário e a senha configurados. Use `docker compose stop` para parar o serviço e preservar os dados.
+
+**Novo resultado trimestral.** Baixe a planilha de séries históricas do RI da Méliuz e salve uma nova cópia em `data/` seguindo o padrão `Dados historicos Meliuz_4T26.xlsx` (exemplo). Execute novamente os testes e a carga. Confira o período mais recente na consulta acima e compare a receita com a publicação. Se o RI renomear contas ou reclassificar séries, confira o mapeamento antes da carga. A carga atualiza registros pela chave e preserva registros antigos cujas chaves desapareceram da fonte.
